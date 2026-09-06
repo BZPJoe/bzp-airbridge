@@ -1,0 +1,146 @@
+# BZP Airbridge: estimated RF fan state, not physical feedback.
+# Change the resync selector to match the fan after using its physical remote.
+input_select:
+  bzp_airbridge_estimated_state:
+    name: BZP Airbridge resync estimated state
+    icon: mdi:sync
+    options: [Unsynced, "Off", Low, Medium, High]
+
+script:
+  bzp_airbridge_rf_send:
+    alias: BZP Airbridge guarded RF send
+    mode: single
+    fields:
+      command:
+        required: true
+        selector:
+          select:
+            options: [power_toggle, speed_up, speed_down]
+    sequence:
+      - condition: template
+        value_template: "{{ command in ['power_toggle', 'speed_up', 'speed_down'] }}"
+      - if:
+          - condition: template
+            value_template: "{{ not is_state('binary_sensor.bzp_airbridge_connected','on') or states('sensor.bzp_airbridge_bridge_activity').startswith('Listening') }}"
+        then:
+          - stop: "Airbridge is unavailable or learning; command not sent."
+            error: true
+      - action: button.press
+        target:
+          entity_id: "{{ 'button.bzp_airbridge_' ~ command }}"
+      - delay: "00:00:02"
+      - if:
+          - condition: template
+            value_template: "{{ not states('sensor.bzp_airbridge_bridge_activity').startswith('Replay completed') }}"
+        then:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.bzp_airbridge_estimated_state
+            data:
+              option: Unsynced
+          - stop: "Airbridge did not report a completed replay; resync required."
+            error: true
+
+  bzp_airbridge_set_fan:
+    alias: BZP Airbridge set fan
+    description: Estimated RF control. Serialized requests; three speed steps. No fan reception feedback.
+    mode: queued
+    max: 10
+    fields:
+      level:
+        required: true
+        selector:
+          number:
+            min: 0
+            max: 3
+    sequence:
+      - variables:
+          requested: "{{ level | int(-1) }}"
+          previous: "{{ states('input_select.bzp_airbridge_estimated_state') }}"
+      - condition: template
+        value_template: "{{ requested in [0,1,2,3] and previous in ['Off','Low','Medium','High'] }}"
+      - condition: state
+        entity_id: binary_sensor.bzp_airbridge_connected
+        state: "on"
+      - condition: template
+        value_template: "{{ not states('sensor.bzp_airbridge_bridge_activity').startswith('Listening') }}"
+      - choose:
+          - conditions: "{{ requested == 0 and previous != 'Off' }}"
+            sequence:
+              - action: script.bzp_airbridge_rf_send
+                data:
+                  command: power_toggle
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.bzp_airbridge_estimated_state
+                data:
+                  option: "Off"
+          - conditions: "{{ requested > 0 }}"
+            sequence:
+              - if: "{{ previous == 'Off' }}"
+                then:
+                  - action: script.bzp_airbridge_rf_send
+                    data:
+                      command: power_toggle
+                  # Normalize speed after power-on rather than assuming remembered speed.
+                  - repeat:
+                      count: 2
+                      sequence:
+                        - action: script.bzp_airbridge_rf_send
+                          data:
+                            command: speed_down
+                  - action: input_select.select_option
+                    target:
+                      entity_id: input_select.bzp_airbridge_estimated_state
+                    data:
+                      option: Low
+              - variables:
+                  current: "{{ {'Low':1,'Medium':2,'High':3}.get(states('input_select.bzp_airbridge_estimated_state'), 1) }}"
+              - repeat:
+                  count: "{{ (requested - current) | abs }}"
+                  sequence:
+                    - action: script.bzp_airbridge_rf_send
+                      data:
+                        command: "{{ 'speed_up' if requested > current else 'speed_down' }}"
+                    - action: input_select.select_option
+                      target:
+                        entity_id: input_select.bzp_airbridge_estimated_state
+                      data:
+                        option: "{{ ['Off','Low','Medium','High'][current + (repeat.index if requested > current else -repeat.index)] }}"
+
+template:
+  - fan:
+      - name: BZP Airbridge
+        unique_id: bzp_airbridge_fan
+        default_entity_id: fan.bzp_airbridge
+        availability: "{{ is_state('binary_sensor.bzp_airbridge_connected', 'on') and states('input_select.bzp_airbridge_estimated_state') in ['Off','Low','Medium','High'] }}"
+        state: "{{ states('input_select.bzp_airbridge_estimated_state') in ['Low','Medium','High'] }}"
+        percentage: "{{ {'Off':0,'Low':33,'Medium':66,'High':100}.get(states('input_select.bzp_airbridge_estimated_state'),0) }}"
+        speed_count: 3
+        attributes:
+          assumed_state: "{{ true }}"
+          state_source: "Estimated from RF commands; use resync after physical remote changes"
+        turn_on:
+          action: script.bzp_airbridge_set_fan
+          data:
+            level: "{{ {'Low':1,'Medium':2,'High':3}.get(states('input_select.bzp_airbridge_estimated_state'),3) }}"
+        turn_off:
+          action: script.bzp_airbridge_set_fan
+          data:
+            level: 0
+        set_percentage:
+          action: script.bzp_airbridge_set_fan
+          data:
+            level: "{{ 0 if percentage | float <= 0 else 1 if percentage | float <= 34 else 2 if percentage | float <= 67 else 3 }}"
+
+homekit:
+  - name: BZP Airbridge
+    port: 21268
+    mode: bridge
+    filter:
+      include_entities:
+        - fan.bzp_airbridge
+    entity_config:
+      fan.bzp_airbridge:
+        name: BZP Airbridge
+

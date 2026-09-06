@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+__pycache__/
+.esphome/
+secrets.yaml
+*.bin
+*.elf
+captures/
+*.log
+*private*.json
+*backup*.json
+dist/
+build/

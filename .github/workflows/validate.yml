@@ -1,0 +1,24 @@
+name: Validate BZP Airbridge
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: cp firmware/secrets.example.yaml firmware/secrets.yaml
+      - run: c++ -std=c++17 tests/test_pulses.cpp -o /tmp/pulse-tests && /tmp/pulse-tests
+      - run: c++ -std=c++17 tests/test_builder.cpp -o /tmp/builder-tests && /tmp/builder-tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/test_builder.js
+      - run: python tools/build_ui.py && git diff --exit-code firmware/ui/settings-bundle.js
+      - run: esphome config firmware/airbridge.yaml
+      - run: esphome compile firmware/airbridge.yaml

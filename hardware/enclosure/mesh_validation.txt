@@ -1,0 +1,43 @@
+BASE
+  watertight: True
+  winding_consistent: True
+  is_volume: True
+  body_count: 1
+  triangles: 3524
+  bounds_mm: [[0.0, 0.0, 0.0], [36.0, 43.5, 23.0]]
+  extents_mm: [36.0, 43.5, 23.0]
+  volume_mm3: 10511.44
+
+LID
+  watertight: True
+  winding_consistent: True
+  is_volume: True
+  body_count: 1
+  triangles: 3286
+  bounds_mm: [[-1.0, 0.0, 0.0], [37.0, 43.5, 7.0]]
+  extents_mm: [38.0, 43.5, 7.0]
+  volume_mm3: 3341.23
+
+ASSEMBLY FIT CHECKS
+  base_to_lid_overlap_mm3: 0.000000
+  base_to_cc1101_pcb_overlap_mm3: 0.000000
+  lid_to_cc1101_pcb_overlap_mm3: 0.000000
+  base_to_sma_barrel_overlap_mm3: 0.000000
+  lid_to_sma_barrel_overlap_mm3: 0.000000
+  base_to_esp32_pcb_overlap_mm3: 0.000000
+  lid_to_esp32_pcb_overlap_mm3: 0.000000
+  base_to_usb_c_shell_overlap_mm3: 0.000000
+  lid_to_usb_c_shell_overlap_mm3: 0.000000
+
+DESIGN CLEARANCES
+  under_board_wiring_height_mm: 15.00
+  lid_clearance_per_side_mm: 0.25
+  snap_pocket_radial_clearance_mm: 0.18
+  snap_arm_dimensions_mm: 8.0 wide x 5.0 free length x 1.0 thick
+  cc1101_sma_radial_clearance_mm: 0.65
+  usb_c_opening_mm: 12.0 x 6.4
+  enclosure_fasteners: none (two flexible snap latches)
+  board_fasteners: none (drop-on locating pins/guides)
+  slicer_support_material_required: no
+
+ALL_CHECKS_PASS: True
