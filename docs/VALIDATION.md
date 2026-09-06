@@ -1,6 +1,6 @@
 # Validation — Remote Builder beta
 
-Built with ESPHome 2026.8.2 for ESP32-C3, ESP-IDF, 4 MB flash. Final build: 1,113,564 bytes (60.7% of app partition); static RAM 131,262 bytes (40.9%). Compiler success is not an appliance compatibility test.
+Built with ESPHome 2026.8.2 for ESP32-C3, ESP-IDF, 4 MB flash. Final build: 1,113,576 bytes (60.7% of app partition); static RAM 131,262 bytes (40.9%). Compiler success is not an appliance compatibility test.
 
 | Check | Result |
 |---|---|
