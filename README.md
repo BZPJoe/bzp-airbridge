@@ -14,6 +14,8 @@ An ESP32-C3 + CC1101 RF bridge with an offline settings page, visual Remote Buil
 
 The actual project build: ESP32-C3 and CC1101 installed in the printed enclosure.
 
+**Print this case:** [Download the case and print profile on MakerWorld](https://makerworld.com/en/models/3271985-bzp-airbridge-esp32-c3-cc1101-controller-case#profileId-3710223).
+
 - Four custom remotes sharing eight custom button slots.
 - Name, icon, and position editing before learning individual buttons.
 - Animated 20-second listening countdown and explicit save/discard.
