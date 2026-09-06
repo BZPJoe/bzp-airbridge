@@ -9,6 +9,10 @@ An ESP32-C3 + CC1101 RF bridge with an offline settings page, visual Remote Buil
 **v0.2.0 beta.** Airbar power replay has been confirmed on the project hardware. A captured signal is not proof of appliance compatibility. This is not a universal remote or rolling-code bypass.
 
 ## Features
+ 
+![BZP Airbridge assembled in its printed case, with the removable lid alongside](assets/build-photo.jpg)
+
+The actual project build: ESP32-C3 and CC1101 installed in the printed enclosure.
 
 - Four custom remotes sharing eight custom button slots.
 - Name, icon, and position editing before learning individual buttons.
