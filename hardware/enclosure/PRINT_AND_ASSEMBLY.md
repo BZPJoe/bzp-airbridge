@@ -1,5 +1,7 @@
 # ESP32-C3 + AOICRIE CC1101 snap-fit enclosure
 
+**Earlier generated prototype.** For the current owner-supplied case files, see [base and top](user-supplied/README.md). The instructions and measurements below apply only to this older design.
+
 This enclosure is for two separate boards:
 
 - **Controller:** SATUY ESP32-C3 Super Mini, Amazon ASIN **B0GGB1L8N5**

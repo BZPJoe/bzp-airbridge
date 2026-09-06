@@ -60,7 +60,7 @@ esphome compile firmware/airbridge.yaml
 
 [Architecture](docs/ARCHITECTURE.md) · [Validation](docs/VALIDATION.md) · [Brand kit](docs/BRAND.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-[Settings preview](docs/settings-preview.html) works when served locally and cannot control hardware. [Snap-fit enclosure files](hardware/enclosure/PRINT_AND_ASSEMBLY.md) are prototypes, not certified fits for every board revision.
+[Settings preview](docs/settings-preview.html) works when served locally and cannot control hardware. Download the [owner-supplied case base and top](hardware/enclosure/user-supplied/README.md). The [earlier generated enclosure](hardware/enclosure/PRINT_AND_ASSEMBLY.md) is retained as a prototype reference; its measurements do not apply to the owner-supplied parts.
 
 [Full settings screenshot](assets/remote-builder-preview.png) · [390 px layout preview](docs/mobile-preview.html)
 
