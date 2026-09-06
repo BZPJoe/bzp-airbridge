@@ -35,6 +35,8 @@ An ESP32-C3 + CC1101 RF bridge with an offline settings page, visual Remote Buil
 
 Project hardware: ESP32-C3 Super Mini (ASIN B0GGB1L8N5) and AOICRIE CC1101/SMA 433 MHz radio (ASIN B0D2TM5RY2). Board revisions differ: follow signal names and check pin 1.
 
+**Get the parts:** [Below Zero Productions — Gear We Use & Recommend](https://www.belowz.com/gear/). This page contains Amazon affiliate links. As an Amazon Associate I earn from qualifying purchases.
+
 Shipped profile: **433.937 MHz ASK/OOK**, eight-repeat playback. All custom remotes share this profile. Custom capacity: 16–256 alternating pulses, 50–30,000 µs each, 3–500 ms total. Protected legacy slots retain their 512-pulse format. No infrared, Bluetooth, rolling-code, automatic decoding, arbitrary FSK, or multi-frequency support is claimed. Operate only authorized devices and obey local RF rules.
 
 ## Home Assistant
@@ -63,6 +65,8 @@ esphome compile firmware/airbridge.yaml
 [Settings preview](docs/settings-preview.html) works when served locally and cannot control hardware. Download the [owner-supplied case base and top](hardware/enclosure/user-supplied/README.md). The [earlier generated enclosure](hardware/enclosure/PRINT_AND_ASSEMBLY.md) is retained as a prototype reference; its measurements do not apply to the owner-supplied parts.
 
 [Full settings screenshot](assets/remote-builder-preview.png) · [390 px layout preview](docs/mobile-preview.html)
+
+[MakerWorld description](docs/MAKERWORLD.md) · [Case-parts render](assets/makerworld/case-parts-render.png) · [Software overview](assets/makerworld/software-overview.png)
 
 ## Privacy and license
 
