@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Document the API-key finding aid for Home Assistant setup and reinforce that discovered keys must stay private.
+- Clarify that the dedicated HomeKit bridge publishes the combined BZP Airbridge fan entity, not separate power/speed controls.
+- Explain why the Home Assistant HomeKit service-device page can appear empty and how to recover a stale Apple Home pairing after a bridge reset.
+
 ## 0.2.0-beta.1
 
 - Four custom remote layouts and eight stable custom button slots.

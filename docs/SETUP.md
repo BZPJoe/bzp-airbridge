@@ -15,6 +15,8 @@ First installation uses USB. Wait for upload success and reconnect; slow Wi-Fi c
 
 Open http://bzp-airbridge.local or the router-assigned local IP. The HTTP page intentionally has no sign-in: trusted LAN only, no internet port forwarding. Native ESPHome API encryption is separate from HTTP.
 
+For Home Assistant setup, the settings page includes an API-key finding aid to help locate the existing ESPHome API encryption key. Use that key for the ESPHome integration only. It is a credential: never publish it in screenshots, support posts, or GitHub. The finder does not make the settings page internet-safe; keep the device on a trusted LAN.
+
 The Wi-Fi form tests the new network before saving, with a 45-second rollback. Credentials are POSTed, not placed in URLs. HTTP still requires a trusted network.
 
 ## Recovery and preservation

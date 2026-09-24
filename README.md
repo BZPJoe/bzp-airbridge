@@ -21,6 +21,7 @@ The actual project build: ESP32-C3 and CC1101 installed in the printed enclosure
 - Animated 20-second listening countdown and explicit save/discard.
 - Private JSON backup/import with schema and pulse validation.
 - Stable Home Assistant custom-button entities.
+- API-key finding aid for locating the existing ESPHome encryption key during Home Assistant setup; the key remains private and is never part of the public repository.
 - Existing Vornado power/speed controls and stored captures preserved.
 - 2.4 GHz Wi-Fi configuration with rollback, remote reboot, and password-protected ESPHome OTA.
 - Horton Systems chrome/cyan styling; all page assets stored on-device.
@@ -49,7 +50,7 @@ Shipped profile: **433.937 MHz ASK/OOK**, eight-repeat playback. All custom remo
 
 The original three buttons retain their names. Eight additional entities are named **Custom button 1–8**. Their identities stay stable when you rename/reorder layout buttons; rename them separately in Home Assistant if desired. Empty slots refuse transmission.
 
-The optional [fan package](examples/home-assistant/bzp_airbridge.yaml) wraps the Airbar controls as a three-speed fan. Its state is estimated, not physical feedback. Custom remotes do not automatically become fans/lights/covers.
+The optional [fan package](examples/home-assistant/bzp_airbridge.yaml) wraps the Airbar controls as a three-speed fan. Its state is estimated, not physical feedback. Its dedicated HomeKit Bridge exports only `fan.bzp_airbridge` as one fan accessory; the Home Assistant bridge service page may itself show no entities. If a bridge was reset/unpaired, remove only its stale BZP Airbridge entry from Apple Home and pair again using the current Home Assistant notice. See [Home Assistant and Apple Home setup](docs/HOME-ASSISTANT.md). Custom remotes do not automatically become fans/lights/covers.
 
 ## Development
 
