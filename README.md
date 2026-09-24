@@ -22,6 +22,7 @@ The actual project build: ESP32-C3 and CC1101 installed in the printed enclosure
 - Private JSON backup/import with schema and pulse validation.
 - Stable Home Assistant custom-button entities.
 - API-key finding aid for locating the existing ESPHome encryption key during Home Assistant setup; the key remains private and is never part of the public repository.
+- Home Assistant keeps the last known fan state across Airbridge power loss and reconnects. The settings page provides **Sync fan state** (Off/Low/Medium/High), with the current Home Assistant estimate shown alongside it.
 - Existing Vornado power/speed controls and stored captures preserved.
 - 2.4 GHz Wi-Fi configuration with rollback, remote reboot, and password-protected ESPHome OTA.
 - Horton Systems chrome/cyan styling; all page assets stored on-device.

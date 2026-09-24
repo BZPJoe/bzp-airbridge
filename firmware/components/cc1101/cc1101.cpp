@@ -270,6 +270,14 @@ void CC1101Component::begin_tx() {
 
 void CC1101Component::begin_rx() {
   ESP_LOGV(TAG, "Beginning RX sequence");
+  // Dual-pin raw mode: GDO2 supplies RX; GDO0 is connected to the
+  // ESP32 RMT transmitter, which remains an output between sends.
+  // Do not let both chips drive GDO0. Async TX still uses GDO0 as input
+  // regardless of IOCFG0 (CC1101 datasheet section 27.1).
+  if (this->gdo0_pin_ == nullptr &&
+      this->state_.PKT_FORMAT == static_cast<uint8_t>(PacketFormat::PACKET_FORMAT_ASYNC_SERIAL)) {
+    this->write_(Register::IOCFG0, 0x2E);
+  }
   if (this->gdo0_pin_ != nullptr) {
     this->gdo0_pin_->pin_mode(gpio::FLAG_INPUT);
   }
@@ -484,8 +492,18 @@ void CC1101Component::set_filter_bandwidth(float value) {
   split_float(XTAL_FREQUENCY / (value * 8), 2, e, m);
   this->state_.CHANBW_E = e;
   this->state_.CHANBW_M = static_cast<uint8_t>(m);
+  // TI DN022 section 3.2: analog front-end settings must follow RX bandwidth.
+  const float actual_bw = XTAL_FREQUENCY / (8 * (4 + this->state_.CHANBW_M) * (1 << e));
+  this->state_.FREND1 = actual_bw > 101000 ? 0xB6 : 0x56;
+  this->state_.TEST2 = actual_bw > 325000 ? 0x88 : 0x81;
+  this->state_.TEST1 = actual_bw > 325000 ? 0x31 : 0x35;
+  this->state_.ADC_RETENTION = actual_bw <= 325000;
   if (this->initialized_) {
     this->write_(Register::MDMCFG4);
+    this->write_(Register::FREND1);
+    this->write_(Register::TEST2);
+    this->write_(Register::TEST1);
+    this->write_(Register::FIFOTHR);
   }
 }
 
@@ -747,7 +765,7 @@ void CC1101Component::set_packet_mode(bool value) {
     this->state_.APPEND_STATUS = 0;
   } else {
     // Configure GDO0 for serial data (async serial mode)
-    this->state_.GDO0_CFG = 0x0D;
+    this->state_.GDO0_CFG = this->gdo0_pin_ == nullptr ? 0x2E : 0x0D;
   }
   if (this->initialized_) {
     if (this->gdo0_pin_ != nullptr) {

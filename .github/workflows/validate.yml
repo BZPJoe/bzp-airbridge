@@ -14,6 +14,9 @@ jobs:
       - run: pip install -r requirements.txt
       - run: cp firmware/secrets.example.yaml firmware/secrets.yaml
       - run: c++ -std=c++17 tests/test_pulses.cpp -o /tmp/pulse-tests && /tmp/pulse-tests
+      - run: c++ -std=c++17 tests/test_observer.cpp -o /tmp/observer-tests && /tmp/observer-tests
+      - run: c++ -std=c++17 tests/test_pairing.cpp -o /tmp/pairing-tests && /tmp/pairing-tests
+      - run: python tests/test_observer_state.py
       - run: c++ -std=c++17 tests/test_builder.cpp -o /tmp/builder-tests && /tmp/builder-tests
       - uses: actions/setup-node@v4
         with:

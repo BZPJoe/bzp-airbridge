@@ -13,6 +13,10 @@ document.body.innerHTML=`<main class="wrap">
 <div class="health"><div><small>Radio transmission</small><strong id="txstate" class="warn">Disabled</strong></div></div>
 <button id="tx" disabled>Enable transmission</button>
 <div class="actions" style="margin-top:14px"><button data-command="Power toggle" disabled>Power</button><button data-command="Speed up" disabled>Speed +</button><button data-command="Speed down" disabled>Speed −</button></div></section>
+<section class="card"><h2>Sync fan state</h2><p class="kicker">HomeKit resumes the last known state when Airbridge reconnects after a power loss.</p>
+<dl class="system"><dt>Home Assistant estimate</dt><dd id="fan-estimate">Waiting for Home Assistant</dd></dl>
+<form id="fan-sync-form"><label for="fan-sync-state">What is the fan doing now?</label><select id="fan-sync-state"><option value="Off">Off</option><option value="Low">On · Low</option><option value="Medium">On · Medium</option><option value="High">On · High</option></select><button id="fan-sync" disabled>Sync fan state</button></form>
+<p id="fan-sync-status" class="notice" role="status" aria-live="polite">Choose the actual fan state if the estimate is wrong. Sync updates Home Assistant and HomeKit without sending a radio command.</p><p class="help">Requires the current Airbridge Home Assistant package. The estimate can differ if the fan changes while Airbridge is offline.</p></section>
 <section class="card"><h2>Learn your remote</h2><p class="kicker">Select a command, start listening, then press that button on your original remote.</p>
 <label for="slot">Command to learn</label><select id="slot"><option value="Learn power">Power toggle</option><option value="Learn speed up">Speed up</option><option value="Learn speed down">Speed down</option></select>
 <button id="learn" disabled>Start 20-second capture</button>
@@ -22,6 +26,13 @@ document.body.innerHTML=`<main class="wrap">
 <div class="grid2"><button data-command="Save capture" disabled>Save capture</button><button data-command="Cancel capture" disabled>Cancel</button></div>
 <p class="help">Learning disables transmission. Save only a capture from your remote. Allow 65 seconds for storage before unplugging.</p></section>
 <section class="card"><h2>System</h2><p class="kicker">Device diagnostics and commissioning profile.</p><dl class="system"><dt>Wi-Fi signal</dt><dd id="wifi">—</dd><dt>Uptime</dt><dd id="uptime">—</dd><dt>Radio profile</dt><dd>See firmware configuration</dd><dt>Hardware</dt><dd>ESP32-C3 + CC1101</dd><dt>Fan compatibility</dt><dd>Power replay verified; state is estimated</dd></dl></section>
+<section class="card"><h2>Home Assistant</h2><p class="kicker">Connect using the ESPHome integration.</p>
+<dl class="system"><dt>Bridge address</dt><dd id="ha-address"></dd><dt>API port</dt><dd>6053</dd></dl>
+<ol><li>In Home Assistant, add the ESPHome integration using the bridge address above.</li><li>With the bridge already running, hold its <strong>BOOT</strong> button for at least 2 seconds, then release. BOOT is the button marked BOOT beside the USB-C port—not RESET.</li><li>Within 30 seconds, click <strong>Reveal encryption key</strong> below, then copy it into Home Assistant.</li></ol>
+<p class="help">Do not hold BOOT while powering on or resetting. Each physical press permits one reveal. The displayed key clears after 30 seconds or when you leave this tab. Use only on a trusted network: this page uses unencrypted HTTP, and another client could request the key during the unlock window.</p>
+<button id="ha-reveal" data-pairing disabled>Reveal encryption key</button>
+<div id="ha-secret" hidden><label for="ha-key">Encryption key</label><input id="ha-key" readonly autocomplete="off" spellcheck="false"><div class="grid2"><button id="ha-copy" data-pairing disabled>Copy key</button><button id="ha-hide" data-pairing disabled>Hide key</button></div></div>
+<p id="ha-status" class="notice" role="status" aria-live="polite">Locked. Follow the BOOT-button steps above to reveal your key.</p></section>
 <section class="card"><h2>Configure Wi-Fi</h2><p class="kicker">Connect Airbridge to your home’s 2.4 GHz network.</p>
 <form id="wifi-form"><label for="wifi-ssid">Network name (SSID)</label><input id="wifi-ssid" name="ssid" autocomplete="off" maxlength="32" required placeholder="Enter network name">
 <label for="wifi-password">Wi-Fi password</label><input id="wifi-password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="63" required placeholder="Enter network password">
@@ -40,11 +51,46 @@ document.body.innerHTML=`<main class="wrap">
 <p class="foot">BZP Airbridge · Build your remote. Keep control local.</p></main>`;
 const entities=new Map();let connected=false;let enabled=false;let busy=false;let listening=false;
 const $=id=>document.getElementById(id);
+let pairingBusy=false, pairingTimer;
+$("ha-address").textContent=preview?"bzp-airbridge.local":location.hostname;
+function hidePairingKey(){
+  clearTimeout(pairingTimer);$("ha-key").value="";$("ha-secret").hidden=true;
+  $("ha-copy").disabled=$("ha-hide").disabled=true;
+}
+$("ha-reveal").addEventListener("click",async()=>{
+  if(preview||!connected||pairingBusy)return;
+  hidePairingKey();pairingBusy=true;render();
+  try{
+    const response=await fetch("/airbridge/pairing",{method:"POST",headers:{"X-Airbridge-Request":"pairing"},body:"",cache:"no-store",signal:AbortSignal.timeout(8000)});
+    const key=await response.text();
+    if(!response.ok)throw Error(response.status===409?"Locked: hold BOOT for 2 seconds, release, then click Reveal within 30 seconds.":"Unable to reveal key. Try again after a physical BOOT press.");
+    if(document.hidden)return;
+    if(!/^[A-Za-z0-9+/]{43}=$/.test(key))throw Error("Invalid response from bridge.");
+    $("ha-key").value=key;$("ha-secret").hidden=false;
+    $("ha-status").textContent="Key revealed for 30 seconds. Paste it into Home Assistant. Keep it private.";
+    pairingTimer=setTimeout(()=>{hidePairingKey();$("ha-status").textContent="Key hidden. Hold BOOT again for another reveal.";},30000);
+  }catch(error){$("ha-status").textContent=error.message;}
+  finally{pairingBusy=false;render();}
+});
+$("ha-hide").addEventListener("click",()=>{hidePairingKey();$("ha-status").textContent="Key hidden. Hold BOOT again for another reveal.";});
+$("ha-copy").addEventListener("click",async()=>{
+  const field=$("ha-key");if(!field.value)return;
+  try{
+    if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(field.value);
+    else {field.focus();field.select();if(!document.execCommand("copy"))throw Error("manual");}
+    $("ha-status").textContent="Copied. Paste into Home Assistant. Your clipboard keeps the key until replaced.";
+  }catch{field.focus();field.select();$("ha-status").textContent="Key selected. Use your browser’s Copy command, then paste into Home Assistant.";}
+});
+document.addEventListener("visibilitychange",()=>{if(document.hidden){hidePairingKey();$("ha-status").textContent="Key hidden. Hold BOOT again for another reveal.";}});
+window.addEventListener("pagehide",hidePairingKey);
 function render(){
   $("capture-feedback").classList.toggle("listening",listening&&connected&&!preview);
   if(!connected&&!preview)$("capture-title").textContent="Waiting for connection";
-  document.querySelectorAll("button:not([data-builder])").forEach(b=>b.disabled=preview||!connected||busy);
+  document.querySelectorAll("button:not([data-builder]):not([data-pairing])").forEach(b=>b.disabled=preview||!connected||busy);
+  $("ha-reveal").disabled=preview||!connected||busy||pairingBusy;
+  $("ha-copy").disabled=$("ha-hide").disabled=!$("ha-key").value;
   $("tx").disabled=preview||!connected||busy||!entities.has("Enable transmission");
+  $("fan-sync").disabled=preview||!connected||busy||!entities.has("Fan state sync");
   document.querySelectorAll("[data-command]").forEach(b=>{
     const n=b.dataset.command; const slot={"Power toggle":"Power command saved","Speed up":"Speed up command saved","Speed down":"Speed down command saved"}[n];
     b.disabled=preview||!connected||busy||!entities.has(n)||(slot&&(listening||!isOn(entities.get(slot))));
@@ -64,6 +110,7 @@ function update(e){
   const name=e.name||e.id.split("/").pop();
   entities.set(name,{...entities.get(name),...e});
   if(name==="Enable transmission") enabled=isOn(entities.get(name));
+  if(name==="Fan estimate"&&e.state!==undefined)$("fan-estimate").textContent=String(e.state);
   const ids={"Bridge activity":"activity","Wi-Fi signal":"wifi","Uptime":"uptime","Update status":"update-status","Firmware version":"version"};
   if(ids[name] && e.state!==undefined) $(ids[name]).textContent=String(e.state);
   if(name==="Bridge activity"&&e.state!==undefined){
@@ -90,6 +137,19 @@ async function command(name,action="press"){
   finally{busy=false;render();}
 }
 document.querySelectorAll("[data-command]").forEach(b=>b.addEventListener("click",()=>command(b.dataset.command)));
+$("fan-sync-form").addEventListener("submit",async event=>{
+  event.preventDefault();
+  const entity=entities.get("Fan state sync");
+  if(preview||!connected||busy||!entity)return;
+  busy=true;render();
+  try{
+    const path="/"+entity.id.split("/").map(encodeURIComponent).join("/")+"/set?"+new URLSearchParams({option:$("fan-sync-state").value});
+    const response=await fetch(path,{method:"POST",signal:AbortSignal.timeout(8000)});
+    if(!response.ok)throw Error("Sync request failed ("+response.status+")");
+    $("fan-sync-status").textContent="Sync requested. The Home Assistant estimate above confirms the result. No radio command was sent.";
+  }catch(error){$("fan-sync-status").textContent=error.message;}
+  finally{busy=false;render();}
+});
 $("wifi-form").addEventListener("submit",async event=>{
   event.preventDefault();
   if(preview||!connected||busy)return;

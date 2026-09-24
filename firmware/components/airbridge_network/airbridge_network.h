@@ -1,17 +1,37 @@
 #pragma once
 #include "esphome/core/component.h"
+#include "esphome/core/hal.h"
+#include "pairing_gate.h"
+#include <mutex>
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/components/web_server_base/web_server_base.h"
 
 namespace esphome::airbridge_network {
 class Network : public Component, public AsyncWebHandler {
  public:
+  void set_pairing_key(const std::string &key) { pairing_key_ = key; }
+  void set_pairing_pin(GPIOPin *pin) { pairing_pin_ = pin; }
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
-  void setup() override { web_server_base::global_web_server_base->add_handler(this); }
+  void setup() override { pairing_pin_->setup(); web_server_base::global_web_server_base->add_handler(this); }
   bool canHandle(AsyncWebServerRequest *r) const override {
-    return r->url() == "/airbridge/wifi" && r->method() == HTTP_POST;
+    return (r->url() == "/airbridge/wifi" || r->url() == "/airbridge/pairing") && r->method() == HTTP_POST;
   }
   void handleRequest(AsyncWebServerRequest *r) override {
+    if (r->url() == "/airbridge/pairing") {
+      const auto header = r->get_header("X-Airbridge-Request");
+      bool allowed = false;
+      if (header.has_value() && header.value() == "pairing") {
+        std::lock_guard<std::mutex> lock(pairing_mutex_);
+        allowed = pairing_gate_.consume(millis());
+      }
+      auto *response = r->beginResponse(allowed ? 200 : 409, "text/plain",
+          allowed ? pairing_key_ : "Hold BOOT for 2 seconds, release, then reveal within 30 seconds.");
+      response->addHeader("Cache-Control", "no-store, max-age=0");
+      response->addHeader("Pragma", "no-cache");
+      response->addHeader("X-Content-Type-Options", "nosniff");
+      r->send(response);
+      return;
+    }
     // Custom header rejects ordinary HTML form submissions. This is a trusted-LAN
     // endpoint without login; credentials never enter entities, events, or logs.
     const auto header = r->get_header("X-Airbridge-Request");
@@ -41,6 +61,10 @@ class Network : public Component, public AsyncWebHandler {
     });
   }
   void loop() override {
+    {
+      std::lock_guard<std::mutex> lock(pairing_mutex_);
+      pairing_gate_.sample(pairing_pin_->digital_read(), millis());
+    }
     auto *w = wifi::global_wifi_component;
     if (testing_ && w->is_connected()) {
       const auto next = w->get_sta();
@@ -50,6 +74,10 @@ class Network : public Component, public AsyncWebHandler {
     }
   }
  protected:
+  GPIOPin *pairing_pin_{nullptr};
+  std::string pairing_key_;
+  PairingGate pairing_gate_;
+  std::mutex pairing_mutex_;
   bool pending_{false}, testing_{false};
   wifi::WiFiAP previous_;
 };

@@ -10,6 +10,8 @@ esphome:
   min_version: 2026.8.2
   includes:
     - pulse_store.h
+    - remote_observer.h
+    - reception_diagnostics.h
   on_boot:
     priority: -100
     then:
@@ -19,6 +21,7 @@ esphome:
       - cc1101.begin_rx: radio
       - component.update: firmware_version
       - component.update: update_status
+      - component.update: command_observed
       - text_sensor.template.publish:
           id: activity
           state: Ready
@@ -56,6 +59,11 @@ external_components:
     components: [airbridge_network, cc1101, remote_builder]
 
 airbridge_network:
+  pairing_key: !secret api_encryption_key
+  pairing_pin:
+    number: GPIO9
+    inverted: true
+    mode: INPUT_PULLUP
 
 remote_builder:
   id: builder
@@ -82,11 +90,28 @@ cc1101:
   cs_pin: GPIO7
   frequency: ${rf_frequency}
   modulation_type: ASK/OOK
+  # Raw remote pulses have no CC1101 packet preamble/sync word.
+  sync_mode: None
+  # TI DN022 OOK starting point: AGCCTRL2/1/0 = 03/00/91.
+  magn_target: 33dB
+  max_dvga_gain: Default
+  wait_time: "16"
+  filter_length_ask_ook: 8dB
+  foc_limit: Disabled
   filter_bandwidth: 203kHz
   symbol_rate: 5000
   output_power: 0
 
 globals:
+  - id: scan_step
+    type: int
+    initial_value: '0'
+  - id: observed_sequence
+    type: uint32_t
+    initial_value: '0'
+  - id: sending_slot
+    type: int
+    initial_value: '-1'
   - id: power_frame
     type: std::array<int32_t, 513>
     restore_value: true
@@ -118,12 +143,22 @@ remote_receiver:
   filter: 50us
   idle: 12ms
   buffer_size: 8kb
-  dump: raw
+  # Keep background RF noise out of logs; learning still receives raw frames.
   on_raw:
     then:
       - lambda: |-
+          airbridge::rxcheck().receive(x);
           if (!id(transmitting) && id(builder).learning()) { id(builder).capture(x); return; }
-          if (id(transmitting) || id(learn_target) < 0 || !airbridge::valid(x)) return;
+          if (id(transmitting) || !airbridge::valid(x)) return;
+          if (id(learn_target) < 0) {
+            if (id(candidate_target) >= 0 || id(builder).capture_pending()) return;
+            int slot = airbridge::observer().receive(x, id(power_frame), id(up_frame), id(down_frame), millis());
+            if (slot >= 0) {
+              id(command_observed).publish_state(std::to_string(++id(observed_sequence)) + ":rx:" + std::to_string(slot));
+              ESP_LOGI("airbridge", "Physical remote command recognized: %d", slot);
+            }
+            return;
+          }
           id(candidate) = airbridge::pack(x);
           id(candidate_target) = id(learn_target);
           id(learn_target) = -1;
@@ -142,6 +177,10 @@ remote_transmitter:
     - cc1101.begin_rx: radio
     - lambda: |-
         id(transmitting) = false;
+        airbridge::observer().mute(millis());
+        if (id(sending_slot) >= 0 && id(sending_slot) < 3)
+          id(command_observed).publish_state(std::to_string(++id(observed_sequence)) + ":tx:" + std::to_string(id(sending_slot)));
+        id(sending_slot) = -1;
         id(radio).diagnostic_dump();
         id(activity).publish_state(id(radio).diagnostic_state() == 0x0D
           ? "Replay completed - fan reception unconfirmed"
@@ -169,7 +208,29 @@ switch:
     optimistic: true
     restore_mode: ALWAYS_OFF
 
+select:
+  - platform: template
+    id: fan_state_sync
+    name: Fan state sync
+    entity_category: config
+    options: ["Off", Low, Medium, High]
+    set_action:
+      - lambda: |-
+          const int level = x == "Off" ? 0 : x == "Low" ? 1 : x == "Medium" ? 2 : 3;
+          id(fan_state_sync).publish_state(x);
+          id(command_observed).publish_state(std::to_string(++id(observed_sequence)) + ":sync:" + std::to_string(level));
+
 text_sensor:
+  - platform: homeassistant
+    id: fan_estimate
+    name: Fan estimate
+    entity_id: input_select.bzp_airbridge_estimated_state
+    internal: false
+  - platform: template
+    id: command_observed
+    name: Observed command
+    lambda: return {"0:ready:-1"};
+    update_interval: never
   - platform: template
     id: update_status
     name: Update status
@@ -180,7 +241,7 @@ text_sensor:
     name: Firmware version
     id: firmware_version
     entity_category: diagnostic
-    lambda: return {"0.2.0-beta.1"};
+    lambda: return {"0.2.2-beta.1"};
     update_interval: never
   - platform: template
     id: activity
@@ -209,6 +270,119 @@ sensor:
     name: Uptime
 
 script:
+  - id: inspect_original_rx
+    mode: single
+    then:
+      - lambda: |-
+          id(transmitting) = true;
+          id(radio).begin_original_rx();
+          airbridge::rxcheck() = {};
+          airbridge::rxcheck().active = true;
+          id(radio).diagnostic_dump();
+          id(activity).publish_state("Original receive settings test: 5 minutes; saved buttons unchanged");
+          ESP_LOGI("airbridge.rxcheck", "ORIGINAL RX started: 300 seconds; no captures will be saved");
+      - delay: 300s
+      - lambda: |-
+          ESP_LOGI("airbridge.rxcheck", "ORIGINAL RX complete: callbacks=%u valid=%u", airbridge::rxcheck().total, airbridge::rxcheck().valid_count);
+          airbridge::rxcheck().active = false;
+          id(radio).end_reference_rx();
+      - delay: 100ms
+      - lambda: |-
+          airbridge::observer().mute(millis());
+          id(transmitting) = false;
+          id(activity).publish_state("Original settings test complete; normal settings restored");
+  - id: inspect_reference_rx
+    mode: single
+    then:
+      - lambda: |-
+          id(transmitting) = true;
+          id(radio).begin_reference_rx();
+          airbridge::rxcheck() = {};
+          airbridge::rxcheck().active = true;
+          id(radio).diagnostic_dump();
+          id(activity).publish_state("Reference receive test: press handheld remote; restores after 90 seconds");
+          ESP_LOGI("airbridge.rxcheck", "REFERENCE RX started: 90 seconds");
+      - delay: 90s
+      - lambda: |-
+          ESP_LOGI("airbridge.rxcheck", "REFERENCE RX complete: callbacks=%u valid=%u", airbridge::rxcheck().total, airbridge::rxcheck().valid_count);
+          airbridge::rxcheck().active = false;
+          id(radio).end_reference_rx();
+      - delay: 100ms
+      - lambda: |-
+          airbridge::observer().mute(millis());
+          id(transmitting) = false;
+          id(activity).publish_state("Reference test complete; normal settings restored");
+  - id: inspect_without_wifi
+    mode: single
+    then:
+      - lambda: |-
+          id(transmitting) = true;  // Block replay and learning during this RX-only test.
+          airbridge::rxcheck() = {};
+          airbridge::rxcheck().active = true;
+          ESP_LOGI("airbridge.rxcheck", "QUIET TEST: baseline Wi-Fi on, 5 seconds");
+      - delay: 5s
+      - wifi.disable:
+      - lambda: |-
+          ESP_LOGI("airbridge.rxcheck", "QUIET TEST: Wi-Fi off, 30 seconds; USB logging remains active");
+          airbridge::rxcheck() = {};
+          airbridge::rxcheck().active = true;
+      - delay: 30s
+      - lambda: |-
+          ESP_LOGI("airbridge.rxcheck", "QUIET TEST complete: callbacks=%u valid=%u", airbridge::rxcheck().total, airbridge::rxcheck().valid_count);
+          airbridge::rxcheck().active = false;
+          airbridge::observer().mute(millis());
+          id(transmitting) = false;
+      - wifi.enable:
+  - id: scan_reception
+    mode: single
+    then:
+      - lambda: |-
+          id(transmitting) = true;  // Block commands/learning; radio stays receive-only.
+          id(scan_step) = 0;
+          id(activity).publish_state("Receive-only frequency scan: 18 seconds");
+          id(radio).set_idle();
+          id(radio).set_filter_bandwidth(650000);
+          id(radio).set_if_frequency(355000);
+      - repeat:
+          count: 9
+          then:
+            - lambda: |-
+                const float frequency = 433137000.0f + 200000.0f * id(scan_step)++;
+                id(radio).set_frequency(frequency);
+                airbridge::rxcheck() = {};
+                airbridge::rxcheck().active = true;
+                ESP_LOGI("airbridge.rxcheck", "SCAN frequency=%.3f MHz bandwidth=650kHz", frequency / 1000000.0f);
+            - delay: 2s
+            - lambda: |-
+                ESP_LOGI("airbridge.rxcheck", "SCAN result callbacks=%u valid=%u", airbridge::rxcheck().total, airbridge::rxcheck().valid_count);
+      - lambda: |-
+          airbridge::rxcheck().active = false;
+          id(radio).set_idle();
+          id(radio).set_filter_bandwidth(203000);
+          id(radio).set_if_frequency(153000);
+          id(radio).set_frequency(433937000);
+      - delay: 100ms
+      - lambda: |-
+          airbridge::observer().mute(millis());
+          id(transmitting) = false;
+          id(activity).publish_state("Receive scan complete - normal settings restored");
+  - id: inspect_reception
+    mode: single
+    then:
+      - lambda: |-
+          auto &d = airbridge::rxcheck();
+          d = {};
+          id(radio).diagnostic_dump();
+          ESP_LOGI("airbridge.rxcheck", "Busy: tx=%d learn=%d candidate=%d builder=%d pending=%d", id(transmitting), id(learn_target), id(candidate_target), id(builder).learning(), id(builder).capture_pending());
+          d.dump("saved-power", airbridge::unpack(id(power_frame)));
+          d.dump("saved-up", airbridge::unpack(id(up_frame)));
+          d.dump("saved-down", airbridge::unpack(id(down_frame)));
+          d.active = true;
+      - delay: 60s
+      - lambda: |-
+          auto &d = airbridge::rxcheck();
+          d.active = false;
+          ESP_LOGI("airbridge.rxcheck", "Finished: total=%u valid=%u samples=%u", d.total, d.valid_count, d.samples);
   # Staged hook: no network or installation until release distribution is configured.
   - id: check_updates
     mode: single
@@ -257,6 +431,7 @@ script:
             - switch.turn_on: allow_tx
             - lambda: |-
                 id(transmitting) = true;
+                id(sending_slot) = slot;
                 id(radio).begin_tx();
                 id(radio).diagnostic_dump();
             - if:
@@ -282,6 +457,7 @@ script:
                   - lambda: |-
                       id(radio).begin_rx();
                       id(transmitting) = false;
+                      id(sending_slot) = -1;
                       id(activity).publish_state("Not sent - radio failed to enter transmit mode");
           else:
             - text_sensor.template.publish:
@@ -289,6 +465,70 @@ script:
                 state: "Not sent - command missing, learning active, or radio busy"
 
 button:
+  - platform: template
+    name: Original reception test
+    entity_category: diagnostic
+    on_press:
+      - if:
+          condition:
+            lambda: return !id(transmitting) && id(learn_target) < 0 && id(candidate_target) < 0 && !id(builder).learning() && !id(builder).capture_pending() && !id(inspect_reception).is_running();
+          then:
+            - script.execute: inspect_original_rx
+  - platform: template
+    name: Reference reception test
+    entity_category: diagnostic
+    on_press:
+      - if:
+          condition:
+            lambda: return !id(transmitting) && id(learn_target) < 0 && id(candidate_target) < 0 && !id(builder).learning() && !id(builder).capture_pending() && !id(inspect_reception).is_running();
+          then:
+            - script.execute: inspect_reference_rx
+  - platform: template
+    name: USB quiet reception test
+    entity_category: diagnostic
+    on_press:
+      - if:
+          condition:
+            lambda: return !id(transmitting) && id(learn_target) < 0 && id(candidate_target) < 0 && !id(builder).learning() && !id(builder).capture_pending() && !id(inspect_reception).is_running();
+          then:
+            - script.execute: inspect_without_wifi
+  - platform: template
+    name: Scan remote reception
+    entity_category: diagnostic
+    on_press:
+      - if:
+          condition:
+            lambda: return !id(transmitting) && id(learn_target) < 0 && id(candidate_target) < 0 && !id(builder).learning() && !id(builder).capture_pending() && !id(inspect_reception).is_running();
+          then:
+            - script.execute: scan_reception
+  - platform: template
+    name: Test receive line
+    entity_category: diagnostic
+    on_press:
+      - if:
+          condition:
+            lambda: return !id(transmitting) && id(learn_target) < 0 && !id(builder).learning();
+          then:
+            - lambda: |-
+                id(transmitting) = true;
+                airbridge::rxcheck() = {};
+                airbridge::rxcheck().active = true;
+                id(radio).test_receive_line();
+            - delay: 100ms
+            - lambda: |-
+                ESP_LOGI("airbridge.rxcheck", "Self-test receiver callbacks=%u", airbridge::rxcheck().total);
+                airbridge::rxcheck().active = false;
+                airbridge::observer().mute(millis());
+                id(transmitting) = false;
+  - platform: template
+    name: Inspect remote reception
+    entity_category: diagnostic
+    on_press:
+      - if:
+          condition:
+            lambda: return !id(transmitting);
+          then:
+            - script.execute: inspect_reception
   # Stable API slots: builder labels can change without breaking HA automations.
   - platform: template
     name: Custom button 1
@@ -400,6 +640,11 @@ button:
           id(activity).publish_state("Capture cancelled");
 
 interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          if (airbridge::rxcheck().active)
+            airbridge::rxcheck().energy(id(radio).diagnostic_rssi(), gpio_get_level(GPIO_NUM_3));
   - interval: 6h
     then:
       - if:

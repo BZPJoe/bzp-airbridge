@@ -13,9 +13,19 @@ The [example package](../examples/home-assistant/bzp_airbridge.yaml) is the proj
 1. Enable packages under `homeassistant: packages: !include_dir_named packages` in your existing configuration, merging rather than duplicating that section.
 2. Place the example in `packages/bzp_airbridge.yaml`.
 3. Check configuration, then restart Home Assistant.
-4. Set the resync selector to the fan's actual Off/Low/Medium/High state. Unsynced deliberately makes the fan unavailable.
+4. In the Airbridge settings page, use **Sync fan state** to select the fan's actual Off/Low/Medium/High state, then press **Sync fan state**. The Home Assistant estimate on the page confirms the change. The Home Assistant resync selector is also available. A first installation starts Unsynced until this is done.
 
 Power-on from Off normalizes to Low with two speed-down commands before stepping to the target. This assumes a three-speed fan that stops at Low rather than cycling. Every command is serialized. A completed RF replay means the bridge emitted the signal—not that the appliance received it. Fan state is estimated, not physical feedback. After using a physical remote or changing power externally, resync the estimate.
+
+## Power loss and manual sync
+
+Starting with 0.2.2-beta.1, the package retains its last known fan estimate through an Airbridge power loss, Wi-Fi disconnect, or Home Assistant restart. HomeKit can show No Response while the bridge is actually disconnected; control returns automatically with the saved estimate after it reconnects. It does not transmit a command to force the physical fan into that state.
+
+The estimate is stored in Home Assistant's restoring input-select helper. Changes to the physical fan while the bridge is offline can make it inaccurate. Correct it under **Sync fan state** in the device settings page: choose Off, Low, Medium, or High and press the sync button. This updates Home Assistant and HomeKit without transmitting RF. It also stops any pending fan-control sequence so it cannot overwrite your correction.
+
+Upgrade both the firmware and the example Home Assistant package. For an existing package installation, validate configuration and reload automations after replacing the package. Remove the old `bzp_airbridge_observer_disconnect` automation if you merged the update manually; leaving it active still clears state on disconnect. Keep the existing helper and entity IDs so their stored state and Apple Home identity are preserved.
+
+Received commands and completed web-page replays update the estimate when observed in sequence. Reconnect snapshots and sequence gaps retain the prior estimate instead of guessing what happened while offline. Passive handheld recognition depends on the radio receiving the remote reliably; it is not physical fan feedback. Failed/interrupted control sequences may still require manual sync.
 
 ## Publish the fan to Apple Home
 
@@ -23,7 +33,7 @@ Home Assistant and Apple Home are two separate steps. The ESPHome device appeari
 
 The dedicated HomeKit Bridge section in the example exports **only `fan.bzp_airbridge`**, named **BZP Airbridge**, on port **21268**. When paired, Apple Home should show a fan accessory with on/off and three-speed control. Do not add the power switch and speed selector separately; the fan entity is the combined accessory.
 
-1. Confirm `fan.bzp_airbridge` is available (not `unavailable`). If unavailable after a Home Assistant restart, set the resync selector to the fan's known physical state first.
+1. Confirm `fan.bzp_airbridge` is available (not `unavailable`). On first setup, or if the estimate is Unsynced after an interrupted command, use **Sync fan state** to enter the fan's actual state. Ordinary reconnects preserve the estimate.
 2. Check Home Assistant configuration, then restart Home Assistant or run the HomeKit reload action to apply YAML changes.
 3. In Home Assistant, open **Settings → Devices & services → HomeKit Bridge**. Find **BZP Airbridge** and its pairing card/code in Notifications.
 4. In Apple Home, choose **Add Accessory**, then scan the QR code or use **More Options / Don't Have a Code?** and enter the current code. Keep the iPhone and Home Assistant on the same local network so discovery can work.

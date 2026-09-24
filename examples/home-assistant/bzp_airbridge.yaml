@@ -1,6 +1,9 @@
 # BZP Airbridge: estimated RF fan state, not physical feedback.
-# Change the resync selector to match the fan after using its physical remote.
+# Restore the last known estimate after reconnect/restart; sync in settings if needed.
 input_select:
+  bzp_airbridge_speed:
+    name: BZP Airbridge remembered speed
+    options: [Low, Medium, High]
   bzp_airbridge_estimated_state:
     name: BZP Airbridge resync estimated state
     icon: mdi:sync
@@ -133,6 +136,96 @@ template:
           data:
             level: "{{ 0 if percentage | float <= 0 else 1 if percentage | float <= 34 else 2 if percentage | float <= 67 else 3 }}"
 
+automation:
+
+  - id: bzp_airbridge_observe_remote
+    alias: BZP Airbridge - Observe RF commands
+    mode: queued
+    max: 30
+    triggers:
+      - trigger: state
+        entity_id: sensor.bzp_airbridge_observed_command
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.to_state is not none and trigger.to_state.state.split(':') | length == 3 }}"
+    actions:
+      - variables:
+          parts: "{{ trigger.to_state.state.split(':') }}"
+          origin: "{{ parts[1] }}"
+          slot: "{{ parts[2] | int(-1) }}"
+          previous: "{{ states('input_select.bzp_airbridge_estimated_state') }}"
+          before: "{{ trigger.from_state.state.split(':') if trigger.from_state is not none else [] }}"
+      - condition: template
+        value_template: "{{ (origin in ['rx','tx'] and slot in [0,1,2]) or (origin == 'sync' and slot in [0,1,2,3]) }}"
+      - if:
+          - condition: template
+            value_template: "{{ before | length != 3 or (parts[0] | int(0)) != (before[0] | int(0)) + 1 }}"
+        then:
+          - stop: Reconnect snapshot or sequence gap; retain the last known estimate.
+      - if: "{{ origin == 'sync' }}"
+        then:
+          - action: script.turn_off
+            target:
+              entity_id:
+                - script.bzp_airbridge_set_fan
+                - script.bzp_airbridge_rf_send
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.bzp_airbridge_estimated_state
+            data:
+              option: "{{ ['Off','Low','Medium','High'][slot] }}"
+          - stop: State synced from the Airbridge settings page; no RF command sent.
+      - if:
+          - condition: template
+            value_template: "{{ origin == 'rx' and is_state('script.bzp_airbridge_set_fan','on') }}"
+        then:
+          - action: script.turn_off
+            target:
+              entity_id:
+                - script.bzp_airbridge_set_fan
+                - script.bzp_airbridge_rf_send
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.bzp_airbridge_estimated_state
+            data:
+              option: Unsynced
+          - stop: Physical remote interrupted an active sequence; resync required.
+      # Existing fan script accounts for its own sends. Do not count those twice.
+      - condition: template
+        value_template: "{{ origin == 'rx' or not is_state('script.bzp_airbridge_set_fan','on') }}"
+      - condition: template
+        value_template: "{{ previous in ['Off','Low','Medium','High'] }}"
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.bzp_airbridge_estimated_state
+        data:
+          option: >-
+            {% set levels = ['Off','Low','Medium','High'] %}
+            {% set n = levels.index(previous) %}
+            {% if slot == 0 %}
+              {{ states('input_select.bzp_airbridge_speed') if n == 0 else 'Off' }}
+            {% elif n == 0 %}
+              Off
+            {% elif slot == 1 %}
+              {{ levels[[n+1,3] | min] }}
+            {% else %}
+              {{ levels[[n-1,1] | max] }}
+            {% endif %}
+  - id: bzp_airbridge_sync_selected_speed
+    alias: BZP Airbridge - Remember speed
+    triggers:
+      - trigger: state
+        entity_id: input_select.bzp_airbridge_estimated_state
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.to_state.state in ['Low','Medium','High'] }}"
+    actions:
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.bzp_airbridge_speed
+        data:
+          option: "{{ trigger.to_state.state }}"
+
 homekit:
   - name: BZP Airbridge
     port: 21268
@@ -143,4 +236,3 @@ homekit:
     entity_config:
       fan.bzp_airbridge:
         name: BZP Airbridge
-

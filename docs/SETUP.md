@@ -17,6 +17,10 @@ Open http://bzp-airbridge.local or the router-assigned local IP. The HTTP page i
 
 For Home Assistant setup, the settings page includes an API-key finding aid to help locate the existing ESPHome API encryption key. Use that key for the ESPHome integration only. It is a credential: never publish it in screenshots, support posts, or GitHub. The finder does not make the settings page internet-safe; keep the device on a trusted LAN.
 
+To reveal the key, hold BOOT for at least two seconds with the device already running, release it, and click **Reveal encryption key** within 30 seconds. Each press unlocks one reveal; the page clears the key after 30 seconds or when hidden. Do not hold BOOT during power-on/reset for this operation.
+
+With firmware 0.2.2-beta.1 and the updated [Home Assistant package](HOME-ASSISTANT.md), the fan resumes its last known estimate when Airbridge reconnects after losing power. Under **Sync fan state**, choose the actual Off/Low/Medium/High state and press the sync button if correction is needed. Check the displayed Home Assistant estimate for confirmation. Sync does not transmit RF.
+
 The Wi-Fi form tests the new network before saving, with a 45-second rollback. Credentials are POSTed, not placed in URLs. HTTP still requires a trusted network.
 
 ## Recovery and preservation

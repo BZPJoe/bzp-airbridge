@@ -6,6 +6,7 @@
 #include "esphome/core/automation.h"
 #include "cc1101defs.h"
 #include <vector>
+#include <driver/gpio.h>
 #ifdef USE_ESP32
 #include "soc/gpio_reg.h"
 #include "soc/soc.h"
@@ -36,11 +37,92 @@ class CC1101Component final : public Component,
   void begin_rx();
   void reset();
   void set_idle();
+  void begin_original_rx() {
+    if (reference_active_) return;
+    reference_saved_ = state_;
+    reference_active_ = true;
+    enter_idle_();
+    // Original published firmware's modem/analog settings. Keep GDO0
+    // high impedance: it shares the ESP's driven TX line, not the RX wire.
+    const uint8_t settings[][2] = {
+      {0x00,0x0D},{0x01,0x2E},{0x02,0x2E},{0x03,0x07},
+      {0x10,0x87},{0x11,0x93},{0x12,0x32},{0x13,0x22},{0x14,0xF8},
+      {0x18,0x14},{0x19,0x36},{0x1B,0xC7},{0x1C,0x00},{0x1D,0xB1},
+      {0x20,0xF8},{0x21,0x56},{0x22,0x11},{0x2C,0x88},{0x2D,0x31}
+    };
+    for (const auto &setting : settings) state_.regs()[setting[0]] = setting[1];
+    configure();
+  }
+  // Temporary RX-only comparison with the Flipper CC1101 OOK 270 kHz
+  // register profile, adapted for GDO2 reception and our existing frequency.
+  void begin_reference_rx() {
+    if (reference_active_) return;
+    reference_saved_ = state_;
+    reference_active_ = true;
+    enter_idle_();
+    strobe_(Command::RES);
+    delay(5);
+    read_(Register::IOCFG2, state_.regs(), 47);
+    const uint8_t settings[][2] = {
+      {0x00,0x0D},{0x01,0x2E},{0x02,0x2E},{0x03,0x47},
+      {0x08,0x32},{0x0A,0x00},{0x0B,0x06},
+      {0x10,0x67},{0x11,0x32},{0x12,0x30},{0x13,0x00},{0x14,0x00},
+      {0x18,0x18},{0x19,0x18},{0x1B,0x03},{0x1C,0x00},{0x1D,0x40},
+      {0x20,0xFB},{0x21,0xB6},{0x22,0x11},{0x2C,0x81},{0x2D,0x35}
+    };
+    for (const auto &setting : settings) state_.regs()[setting[0]] = setting[1];
+    for (unsigned i = 0x0D; i <= 0x0F; ++i) state_.regs()[i] = reference_saved_.regs()[i];
+    configure();
+  }
+  void end_reference_rx() {
+    if (!reference_active_) return;
+    enter_idle_();
+    state_ = reference_saved_;
+    reference_active_ = false;
+    configure();
+    begin_rx();
+  }
+  // Board-specific diagnostic: GDO2 is wired to GPIO3 on Airbridge.
+  // TI SWRS061: 0x2F drives low, inversion bit 0x40 drives high.
+  // Never enters TX and restores the original output selection afterwards.
+  void test_receive_line() {
+    uint8_t original;
+    this->read_(Register::IOCFG2, &original, 1);
+    unsigned lows = 0, highs = 0;
+    for (unsigned i = 0; i < 12; ++i) {
+      this->write_(Register::IOCFG2, 0x2F);
+      delayMicroseconds(500);
+      lows += gpio_get_level(GPIO_NUM_3) == 0;
+      this->write_(Register::IOCFG2, 0x6F);
+      delayMicroseconds(500);
+      highs += gpio_get_level(GPIO_NUM_3) == 1;
+    }
+    this->write_(Register::IOCFG2, 0x2F);
+    delayMicroseconds(500);
+    this->write_(Register::IOCFG2, original);
+    ESP_LOGI("airbridge.rxcheck", "Receive line self-test: IOCFG2=%02X low=%u/12 high=%u/12", original, lows, highs);
+  }
   uint8_t diagnostic_state() {
     this->read_(Register::MARCSTATE);
     return this->state_.MARC_STATE;
   }
+  float diagnostic_rssi() {
+    uint8_t raw;
+    this->read_(Register::RSSI, &raw, 1);
+    return float(int8_t(raw)) * 0.5f - 74.0f;
+  }
   void diagnostic_dump() {
+    uint8_t registers[47];
+    this->read_(Register::IOCFG2, registers, sizeof(registers));
+    for (unsigned i = 0; i < sizeof(registers); i += 8) {
+      std::string line;
+      for (unsigned j = i; j < sizeof(registers) && j < i + 8; ++j) {
+        char value[5];
+        snprintf(value, sizeof(value), "%02X ", registers[j]);
+        line += value;
+      }
+      ESP_LOGI("airbridge.radio", "Registers %02X: %s", i, line.c_str());
+    }
     uint8_t part, version, packet, calibration;
     this->read_(Register::PARTNUM, &part, 1);
     this->read_(Register::VERSION, &version, 1);
@@ -128,6 +210,8 @@ class CC1101Component final : public Component,
   uint8_t pa_table_[PA_TABLE_SIZE]{};
 
   CC1101State state_;
+  CC1101State reference_saved_{};
+  bool reference_active_{false};
 
   // GDO pin for packet reception
   InternalGPIOPin *gdo0_pin_{nullptr};
